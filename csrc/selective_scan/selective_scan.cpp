@@ -78,6 +78,7 @@ void set_ssm_params_fwd(SSMParamsBase &params,
                         void* D_ptr,
                         void* delta_bias_ptr,
                         void* x_ptr,
+                        void* h_ptr, // [NEW]
                         bool has_z,
                         bool delta_softplus) {
 
@@ -107,6 +108,7 @@ void set_ssm_params_fwd(SSMParamsBase &params,
     params.delta_bias_ptr = delta_bias_ptr;
     params.out_ptr = out.data_ptr();
     params.x_ptr = x_ptr;
+    params.h_ptr = h_ptr; // [NEW]
     params.z_ptr = has_z ? z.data_ptr() : nullptr;
     params.out_z_ptr = has_z ? out_z.data_ptr() : nullptr;
     // All stride are in elements, not bytes.
@@ -171,6 +173,8 @@ void set_ssm_params_bwd(SSMParamsBwd &params,
                         const at::Tensor dz,
                         void* dD_ptr,
                         void* ddelta_bias_ptr,
+                        void* ddelta_bias_ptr,
+                        void* dh_ptr, // [NEW]
                         bool has_z,
                         bool delta_softplus,
                         bool recompute_out_z) {
@@ -181,7 +185,7 @@ void set_ssm_params_bwd(SSMParamsBwd &params,
                        // If not recompute_out_z, pass dout instead of out_z.
                        // This won't be used by the bwd kernel
                        recompute_out_z ? out_z : dout,
-                       D_ptr, delta_bias_ptr, x_ptr, has_z, delta_softplus);
+                       D_ptr, delta_bias_ptr, x_ptr, nullptr, has_z, delta_softplus); // Pass nullptr for h_ptr in bwd for now
     if (!recompute_out_z) { params.out_z_ptr = nullptr; }
 
     // Set the pointers and strides.
@@ -193,6 +197,7 @@ void set_ssm_params_bwd(SSMParamsBwd &params,
     params.dD_ptr = dD_ptr;
     params.ddelta_ptr = ddelta.data_ptr();
     params.ddelta_bias_ptr = ddelta_bias_ptr;
+    params.dh_ptr = dh_ptr; // [NEW]
     params.dz_ptr = has_z ? dz.data_ptr() : nullptr;
     // All stride are in elements, not bytes.
     params.dout_batch_stride = dout.stride(0);
@@ -229,7 +234,10 @@ selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
                   const c10::optional<at::Tensor> &D_,
                   const c10::optional<at::Tensor> &z_,
                   const c10::optional<at::Tensor> &delta_bias_,
-                  bool delta_softplus) {
+                  const c10::optional<at::Tensor> &z_,
+                  const c10::optional<at::Tensor> &delta_bias_,
+                  bool delta_softplus,
+                  const c10::optional<at::Tensor> &h_) { // [NEW] Optional h output tensor
     auto input_type = u.scalar_type();
     auto weight_type = A.scalar_type();
     TORCH_CHECK(input_type == at::ScalarType::Float || input_type == at::ScalarType::Half || input_type == at::ScalarType::BFloat16);
@@ -304,6 +312,16 @@ selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
         out_z = torch::empty_like(z);
     }
 
+    // [NEW] Check h shape
+    if (h_.has_value()) {
+        auto h = h_.value();
+        TORCH_CHECK(h.scalar_type() == input_type); // Should match input type? Or float? Usually float for state.
+        // Actually, state in kernel is float/complex. But we might want to cast to input_type to save memory?
+        // Let's assume input_type for now to match other tensors.
+        TORCH_CHECK(h.is_cuda());
+        CHECK_SHAPE(h, batch_size, dim, dstate, seqlen);
+    }
+
     const int n_chunks = (seqlen + 2048 - 1) / 2048;
     // const int n_chunks = (seqlen + 1024 - 1) / 1024;
     // at::Tensor out = torch::empty_like(u);
@@ -318,6 +336,11 @@ selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
                        D_.has_value() ? D_.value().data_ptr() : nullptr,
                        delta_bias_.has_value() ? delta_bias_.value().data_ptr() : nullptr,
                        x.data_ptr(),
+                       has_z,
+                       D_.has_value() ? D_.value().data_ptr() : nullptr,
+                       delta_bias_.has_value() ? delta_bias_.value().data_ptr() : nullptr,
+                       x.data_ptr(),
+                       h_.has_value() ? h_.value().data_ptr() : nullptr, // [NEW]
                        has_z,
                        delta_softplus);
 
@@ -345,8 +368,10 @@ selective_scan_bwd(const at::Tensor &u, const at::Tensor &delta,
                   const c10::optional<at::Tensor> &x_,
                   const c10::optional<at::Tensor> &out_,
                   c10::optional<at::Tensor> &dz_,
+                  c10::optional<at::Tensor> &dz_,
                   bool delta_softplus,
-                  bool recompute_out_z) {
+                  bool recompute_out_z,
+                  const c10::optional<at::Tensor> &dh_) { // [NEW] Optional dh input tensor
     auto input_type = u.scalar_type();
     auto weight_type = A.scalar_type();
     TORCH_CHECK(input_type == at::ScalarType::Float || input_type == at::ScalarType::Half || input_type == at::ScalarType::BFloat16);
@@ -465,6 +490,14 @@ selective_scan_bwd(const at::Tensor &u, const at::Tensor &delta,
     at::Tensor ddelta_bias;
     if (delta_bias_.has_value()) { ddelta_bias = torch::zeros_like(delta_bias_.value()); }
 
+    // [NEW] Check dh shape
+    if (dh_.has_value()) {
+        auto dh = dh_.value();
+        TORCH_CHECK(dh.scalar_type() == input_type); // Should match input type?
+        TORCH_CHECK(dh.is_cuda());
+        CHECK_SHAPE(dh, batch_size, dim, dstate, seqlen);
+    }
+
     SSMParamsBwd params;
     set_ssm_params_bwd(params, batch_size, dim, seqlen, dstate, n_groups, n_chunks, is_variable_B, is_variable_C,
                        u, delta, A, B, C, z, out, out_z,
@@ -474,6 +507,7 @@ selective_scan_bwd(const at::Tensor &u, const at::Tensor &delta,
                        dout, du, ddelta, dA, dB, dC, dz,
                        D_.has_value() ? dD.data_ptr() : nullptr,
                        delta_bias_.has_value() ? ddelta_bias.data_ptr() : nullptr,
+                       dh_.has_value() ? dh_.value().data_ptr() : nullptr, // [NEW]
                        has_z, delta_softplus, recompute_out_z);
 
     // Otherwise the kernel will be launched from cuda:0 device
@@ -492,6 +526,6 @@ selective_scan_bwd(const at::Tensor &u, const at::Tensor &delta,
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("fwd", &selective_scan_fwd, "Selective scan forward");
-    m.def("bwd", &selective_scan_bwd, "Selective scan backward");
+    m.def("fwd", &selective_scan_fwd, "Selective scan forward", py::arg("u"), py::arg("delta"), py::arg("A"), py::arg("B"), py::arg("C"), py::arg("D_")=c10::nullopt, py::arg("z_")=c10::nullopt, py::arg("delta_bias_")=c10::nullopt, py::arg("delta_softplus")=false, py::arg("h_")=c10::nullopt);
+    m.def("bwd", &selective_scan_bwd, "Selective scan backward", py::arg("u"), py::arg("delta"), py::arg("A"), py::arg("B"), py::arg("C"), py::arg("D_")=c10::nullopt, py::arg("z_")=c10::nullopt, py::arg("delta_bias_")=c10::nullopt, py::arg("dout"), py::arg("x_")=c10::nullopt, py::arg("out_")=c10::nullopt, py::arg("dz_")=c10::nullopt, py::arg("delta_softplus")=false, py::arg("recompute_out_z")=false, py::arg("dh_")=c10::nullopt);
 }

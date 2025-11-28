@@ -246,6 +246,30 @@ void selective_scan_bwd_kernel(SSMParamsBwd params) {
                     smem_load_weight_C, (params.seqlen - chunk * kChunkSize) * (!kIsComplex ? 1 : 2));
             }
             // const weight_t A_val = smem_a[state_idx];
+            // [NEW] Load dh if provided
+            float dh_vals[kNItems] = {0};
+            if (params.dh_ptr != nullptr) {
+                 #pragma unroll
+                 for (int i = 0; i < kNItems; ++i) {
+                     int global_seq_idx = chunk * kChunkSize + i;
+                     if (global_seq_idx < params.seqlen) {
+                         size_t offset = (size_t)batch_id * params.dim * params.dstate * params.seqlen +
+                                         (size_t)dim_id * params.dstate * params.seqlen +
+                                         (size_t)state_idx * params.seqlen +
+                                         global_seq_idx;
+                         if constexpr (!kIsComplex) {
+                             dh_vals[i] = float(reinterpret_cast<input_t*>(params.dh_ptr)[offset]);
+                         } else {
+                             // For complex, assuming we only stored real part in fwd, so we only read real part here?
+                             // Or if h is complex, we read complex.
+                             // Consistent with fwd: we stored real part in fwd (thread_data[i].z).
+                             // So here we read it as real part of gradient.
+                             dh_vals[i] = float(reinterpret_cast<input_t*>(params.dh_ptr)[offset]);
+                         }
+                     }
+                 }
+            }
+
             scan_t thread_data[kNItems], thread_reverse_data[kNItems];
             if constexpr (!kIsComplex) {
                 #pragma unroll
@@ -260,7 +284,7 @@ void selective_scan_bwd_kernel(SSMParamsBwd params) {
                     thread_reverse_data[i].y = dout_vals[i] *
                         (!kIsVariableC
                          ? (!kIsVariableB ? B_val * C_val : C_val)
-                         : (!kIsVariableB ? B_val * C_vals[i] : C_vals[i]));
+                         : (!kIsVariableB ? B_val * C_vals[i] : C_vals[i])) + dh_vals[i]; // [NEW] Add dh
                 }
                 __syncthreads();
                 thread_reverse_data[kNItems - 1].x = threadIdx.x == kNThreads - 1
@@ -350,7 +374,7 @@ void selective_scan_bwd_kernel(SSMParamsBwd params) {
                         * conj(!kIsVariableC
                                 ? (!kIsVariableB ? B_val * C_val : C_val)
                                 : (!kIsVariableB ? B_val * C_vals[i] : C_vals[i]));
-                    thread_reverse_data[i].z = dout_BC.real_;
+                    thread_reverse_data[i].z = dout_BC.real_ + dh_vals[i]; // [NEW] Add dh (real part)
                     thread_reverse_data[i].w = dout_BC.imag_;
                 }
                 __syncthreads();
