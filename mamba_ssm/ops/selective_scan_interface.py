@@ -43,8 +43,7 @@ class SelectiveScanFn(torch.autograd.Function):
         if C.dim() == 3:
             C = rearrange(C, "b dstate l -> b 1 dstate l")
             ctx.squeeze_C = True
-            C = rearrange(C, "b dstate l -> b 1 dstate l")
-            ctx.squeeze_C = True
+
         
         h = None
         if return_h:
