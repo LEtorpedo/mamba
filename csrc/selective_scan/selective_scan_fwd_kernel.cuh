@@ -281,9 +281,12 @@ void selective_scan_fwd_kernel(SSMParamsBase params) {
                                             global_seq_idx;
                             
                             if constexpr (!kIsComplex) {
+                                // scan_t is float2 (x, y). y is the state.
                                 reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].y;
                             } else {
-                                // For complex, we store the real part (z) for now.
+                                // scan_t is float4 (x, y, z, w).
+                                // x, y is complex multiplier. z, w is complex state.
+                                // We store real part of state (z) for now.
                                 reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].z;
                             }
                         }

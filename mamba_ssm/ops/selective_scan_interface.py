@@ -50,6 +50,8 @@ class SelectiveScanFn(torch.autograd.Function):
             batch, dim, seqlen = u.shape
             dstate = A.shape[1]
             h = torch.empty(batch, dim, dstate, seqlen, device=u.device, dtype=u.dtype)
+            if h.stride(-1) != 1:
+                h = h.contiguous()
 
         out, x, *rest = selective_scan_cuda.fwd(u, delta, A, B, C, D, z, delta_bias, delta_softplus, h)
         ctx.delta_softplus = delta_softplus
