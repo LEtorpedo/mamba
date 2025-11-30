@@ -271,47 +271,21 @@ void selective_scan_fwd_kernel(SSMParamsBase params) {
                 if (params.h_ptr != nullptr) {
                     // [NEW] Write hidden state h to global memory
                     // Layout: (B, D, N, L)
-                    // h_ptr points to start of h tensor
-                    // Address calculation:
-                    // batch_id * (dim * dstate * seqlen) + dim_id * (dstate * seqlen) + state_idx * seqlen + (chunk * kChunkSize + i)
-                    // Note: thread_data[i] contains the state.
-                    // For float (real), state is thread_data[i].y
-                    // For complex, state is (thread_data[i].z, thread_data[i].w)
-                    
-                    int global_seq_idx = chunk * kChunkSize + i;
-                    if (global_seq_idx < params.seqlen) {
-                        size_t offset = (size_t)batch_id * params.dim * params.dstate * params.seqlen +
-                                        (size_t)dim_id * params.dstate * params.seqlen +
-                                        (size_t)state_idx * params.seqlen +
-                                        global_seq_idx;
-                        
-                        if constexpr (!kIsComplex) {
-                            reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].y;
-                        } else {
-                            // For complex, we might need to store real and imag separately or as complex type.
-                            // Assuming h is same type as input (float/half), we can't store complex easily unless h is complex tensor.
-                            // But usually input is float/half.
-                            // If input is float, h could be complex<float>.
-                            // Let's assume for now we only support real h extraction or h is cast to input_t (real part?).
-                            // Actually, if weight is complex, state is complex.
-                            // If we want to support complex state extraction, h tensor should be complex.
-                            // For this specific task (Caduceus), weights are complex but we might only need real part or magnitude?
-                            // Wait, Caduceus uses complex states?
-                            // If so, we need to write complex.
-                            // Let's assume h is complex if kIsComplex.
-                            // But we checked h.scalar_type() == input_type in cpp. Input is usually float/half.
-                            // If kIsComplex, input might still be float/half (weights are complex).
-                            // If so, we can't store complex state in float/half tensor without 2x size.
-                            // For simplicity in this "Sanity Check" / "Optimization", let's just store the REAL part if input is real but weights complex?
-                            // Or maybe just fail for complex for now if not critical?
-                            // Mamba usually uses real states (S4D-Real).
-                            // Caduceus might use complex.
-                            // Let's check if we can write complex.
-                            // If h_ptr is cast to input_t*, and input_t is float, we can only write float.
-                            // Let's write .real() for now to be safe/compile, or revisit if we need full complex state.
-                            // Actually, thread_data[i].z is real part of state, .w is imag part.
-                            // Let's write real part.
-                             reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].z;
+                    #pragma unroll
+                    for (int i = 0; i < kNItems; ++i) {
+                        int global_seq_idx = chunk * kChunkSize + threadIdx.x * kNItems + i;
+                        if (global_seq_idx < params.seqlen) {
+                            size_t offset = (size_t)batch_id * params.dim * params.dstate * params.seqlen +
+                                            (size_t)dim_id * params.dstate * params.seqlen +
+                                            (size_t)state_idx * params.seqlen +
+                                            global_seq_idx;
+                            
+                            if constexpr (!kIsComplex) {
+                                reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].y;
+                            } else {
+                                // For complex, we store the real part (z) for now.
+                                reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].z;
+                            }
                         }
                     }
                 }
