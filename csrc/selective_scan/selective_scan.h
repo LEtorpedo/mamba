@@ -98,7 +98,7 @@ struct SSMParamsBwd: public SSMParamsBase {
     void *__restrict__ du_ptr;
     void *__restrict__ dz_ptr;
     void *__restrict__ ddelta_ptr;
-    void *__restrict__ ddelta_ptr;
+
     void *__restrict__ ddelta_bias_ptr;
     void *__restrict__ dh_ptr; // [NEW] Pointer to gradient of hidden states (B, D, N, L)
 };

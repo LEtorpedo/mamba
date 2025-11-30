@@ -173,7 +173,7 @@ void set_ssm_params_bwd(SSMParamsBwd &params,
                         const at::Tensor dz,
                         void* dD_ptr,
                         void* ddelta_bias_ptr,
-                        void* ddelta_bias_ptr,
+
                         void* dh_ptr, // [NEW]
                         bool has_z,
                         bool delta_softplus,
@@ -234,8 +234,7 @@ selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
                   const c10::optional<at::Tensor> &D_,
                   const c10::optional<at::Tensor> &z_,
                   const c10::optional<at::Tensor> &delta_bias_,
-                  const c10::optional<at::Tensor> &z_,
-                  const c10::optional<at::Tensor> &delta_bias_,
+
                   bool delta_softplus,
                   const c10::optional<at::Tensor> &h_) { // [NEW] Optional h output tensor
     auto input_type = u.scalar_type();
@@ -336,10 +335,7 @@ selective_scan_fwd(const at::Tensor &u, const at::Tensor &delta,
                        D_.has_value() ? D_.value().data_ptr() : nullptr,
                        delta_bias_.has_value() ? delta_bias_.value().data_ptr() : nullptr,
                        x.data_ptr(),
-                       has_z,
-                       D_.has_value() ? D_.value().data_ptr() : nullptr,
-                       delta_bias_.has_value() ? delta_bias_.value().data_ptr() : nullptr,
-                       x.data_ptr(),
+
                        h_.has_value() ? h_.value().data_ptr() : nullptr, // [NEW]
                        has_z,
                        delta_softplus);
@@ -368,7 +364,7 @@ selective_scan_bwd(const at::Tensor &u, const at::Tensor &delta,
                   const c10::optional<at::Tensor> &x_,
                   const c10::optional<at::Tensor> &out_,
                   c10::optional<at::Tensor> &dz_,
-                  c10::optional<at::Tensor> &dz_,
+
                   bool delta_softplus,
                   bool recompute_out_z,
                   const c10::optional<at::Tensor> &dh_) { // [NEW] Optional dh input tensor
