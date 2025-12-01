@@ -282,6 +282,11 @@ void selective_scan_fwd_kernel(SSMParamsBase params) {
                             
                             if constexpr (!kIsComplex) {
                                 // scan_t is float2 (x, y). y is the state.
+                                // Debug check
+                                size_t limit = (size_t)params.batch * params.dim * params.dstate * params.seqlen;
+                                if (offset >= limit) {
+                                   printf("ERROR: offset %lu >= limit %lu\n", offset, limit);
+                                }
                                 reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].y;
                             } else {
                                 // scan_t is float4 (x, y, z, w).
