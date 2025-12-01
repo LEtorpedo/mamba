@@ -286,13 +286,13 @@ void selective_scan_fwd_kernel(SSMParamsBase params) {
                                 size_t limit = (size_t)params.batch * params.dim * params.dstate * params.seqlen;
                                 
                                 // Print debug info once per grid
-                                if (batch_id == 0 && dim_id == 0 && chunk == 0 && threadIdx.x == 0 && i == 0) {
-                                    printf("DEBUG: h_ptr=%p, limit=%lu, batch=%d, dim=%d, dstate=%d, seqlen=%d\n", 
-                                           params.h_ptr, limit, params.batch, params.dim, params.dstate, params.seqlen);
-                                }
+                                // if (batch_id == 0 && dim_id == 0 && chunk == 0 && threadIdx.x == 0 && i == 0) {
+                                //     printf("DEBUG: h_ptr=%p, limit=%lu, batch=%d, dim=%d, dstate=%d, seqlen=%d\n", 
+                                //            params.h_ptr, limit, params.batch, params.dim, params.dstate, params.seqlen);
+                                // }
 
                                 if (offset >= limit) {
-                                   printf("ERROR: offset %lu >= limit %lu\n", offset, limit);
+                                   // printf("ERROR: offset %lu >= limit %lu\n", offset, limit);
                                 } else {
                                    // Only write if within bounds
                                    reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].y;
