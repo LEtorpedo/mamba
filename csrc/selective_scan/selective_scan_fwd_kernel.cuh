@@ -284,15 +284,27 @@ void selective_scan_fwd_kernel(SSMParamsBase params) {
                                 // scan_t is float2 (x, y). y is the state.
                                 // Debug check
                                 size_t limit = (size_t)params.batch * params.dim * params.dstate * params.seqlen;
+                                
+                                // Print debug info once per grid
+                                if (batch_id == 0 && dim_id == 0 && chunk == 0 && threadIdx.x == 0 && i == 0) {
+                                    printf("DEBUG: h_ptr=%p, limit=%lu, batch=%d, dim=%d, dstate=%d, seqlen=%d\n", 
+                                           params.h_ptr, limit, params.batch, params.dim, params.dstate, params.seqlen);
+                                }
+
                                 if (offset >= limit) {
                                    printf("ERROR: offset %lu >= limit %lu\n", offset, limit);
+                                } else {
+                                   // Only write if within bounds
+                                   reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].y;
                                 }
-                                reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].y;
                             } else {
                                 // scan_t is float4 (x, y, z, w).
                                 // x, y is complex multiplier. z, w is complex state.
                                 // We store real part of state (z) for now.
-                                reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].z;
+                                size_t limit = (size_t)params.batch * params.dim * params.dstate * params.seqlen;
+                                if (offset < limit) {
+                                    reinterpret_cast<input_t*>(params.h_ptr)[offset] = (input_t)thread_data[i].z;
+                                }
                             }
                         }
                     }
